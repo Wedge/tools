@@ -17,20 +17,28 @@
 
 $script_name = basename(__FILE__);
 $root = dirname(__FILE__);
+$problems = 0;
 set_time_limit(300);
+@ini_set('xdebug.max_nesting_level', 300);
 
-echo '<!DOCTYPE html><html><style>
-	body { font-family: Arial, sans-serif; color: #666; }
-	span { font: 700 17px monospace; }
-	.file { color: teal; }
-	.new { margin-top: 8px; }
-	em { color: #c30; }
-	li { padding: 3px 0 3px 8px; }
+echo '<!DOCTYPE html>
+<html>
+<head>
+	<title>', $script_name, '</title>
+	<style>
+		body { font-family: Arial, sans-serif; color: #666; }
+		span { font: 700 17px monospace; }
+		.file { color: teal; }
+		.new { margin-top: 8px; }
+		em { color: #c30; }
+		li { padding: 3px 0 3px 8px; }
 
-	.duplicates { background: linear-gradient(to right, #fcc, #fff 30px); }
-	.undeclared { background: linear-gradient(to right, #ccf, #fff 30px); }
-	.unused     { background: linear-gradient(to right, #bea, #fff 30px); }
-</style><body>
+		.duplicates { background: linear-gradient(to right, #fcc, #fff 30px); }
+		.undeclared { background: linear-gradient(to right, #ccf, #fff 30px); }
+		.unused     { background: linear-gradient(to right, #bea, #fff 30px); }
+	</style>
+</head>
+<body>
 
 <h1>', $script_name, '</h1>
 <div>By Nao (Wedge.org)</div>
@@ -54,7 +62,8 @@ find_global_problems(array(
 	'$txt',
 	'$context',
 	'$settings',
-	'$modSettings',
+	'$modSettings', // for SMF (forks or mainline)
+	'$theme', // for SMF (forks or mainline)
 	'$options',
 	'$board',
 	'$topic',
@@ -65,11 +74,19 @@ find_global_problems(array(
 	'$action_list',
 ));
 
-echo '</ol></body></html>';
+echo '</ol>';
+
+if (!$problems)
+	echo '<p>No problems found, congratulations!</p>';
+else
+	echo '<p>', $problems, ' problems found, including potential false positives.</p>';
+
+echo '</body>
+</html>';
 
 function find_global_problems($real_globals = array(), $dir = '')
 {
-	global $root;
+	global $root, $problems;
 
 	$old_file = '';
 	$dir = $dir ? $dir : $root;
@@ -115,6 +132,7 @@ function find_global_problems($real_globals = array(), $dir = '')
 				$dupes = array_map('trim', explode(',', $find_dupes));
 				if (count($dupes) > count(array_flip(array_flip($dupes))))
 				{
+					$problems++;
 					$is_new = $file != $old_file;
 					$old_file = $file;
 					echo '<li class="duplicates', $is_new ? ' new' : '', '">Found duplicate globals in <span>', str_replace($root, '', $dir), '/<span class="file">', $file, '</span></span> (', $matches[2][$key], ') -- ', $find_dupes, '</li>';
@@ -131,6 +149,7 @@ function find_global_problems($real_globals = array(), $dir = '')
 					if (!preg_match('~\\' . $test_me . '[^a-zA-Z_]~', $val))
 					{
 						$ex = $matches[0][$key];
+						$problems++;
 						$probably_false_positive =
 							((($r = '$$') && strpos($ex, '$$') !== false) ||
 							(($r = '${$') && strpos($ex, '${$') !== false) ||
@@ -189,6 +208,7 @@ function find_global_problems($real_globals = array(), $dir = '')
 					$in_assign = preg_match('~\\' . $real_global . '\s*=[^=]~', $val);
 					$in_arrass = preg_match('~\\' . $real_global . '\[[^]]*]\s*=[^=]~', $val);
 					$probably_false_positive = $in_foreach || $in_params || $in_list || $in_assign || $in_arrass;
+					$problems++;
 
 					if (!$probably_false_positive || !isset($_GET['ignorefp']))
 					{
@@ -253,16 +273,14 @@ function clean_me_up($php)
 			$php = substr($php, 0, $next);
 			return $php;
 		}
-		else
-		{
-			if (!is_array($look_for))
-				$end += strlen($look_for);
-			$temp = substr($php, $next, $end - $next);
 
-			$breaks = substr_count($temp, "\n") + substr_count($temp, "\r") - substr_count($temp, "\r\n");
-			$php = substr_replace($php, str_repeat("\n", $breaks), $next, $end - $next);
-		}
-		$pos = $next + 1;
+		if (!is_array($look_for))
+			$end += strlen($look_for);
+		$temp = substr($php, $next, $end - $next);
+
+		$breaks = substr_count($temp, "\n") + substr_count($temp, "\r") - substr_count($temp, "\r\n");
+		$php = substr_replace($php, str_pad(str_repeat("\n", $breaks), $end - $next), $next, $end - $next);
+		$pos = $end + 1;
 	}
 }
 
