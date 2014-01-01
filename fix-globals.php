@@ -18,6 +18,7 @@
 $script_name = basename(__FILE__);
 $root = dirname(__FILE__);
 $problems = 0;
+unset($_GET['fixme']); // This is really too much hassle for me to fix, right now.
 set_time_limit(300);
 @ini_set('xdebug.max_nesting_level', 300);
 
@@ -50,9 +51,9 @@ echo '<!DOCTYPE html>
 <p>
 	Add <kbd><a href="', $script_name, '?noclean">?noclean</a></kbd> to view a quick, dirty list of results that may generate more false positives.
 	<br>
-	Add <kbd><a href="', $script_name, '?ignorefp">?ignorefp</a></kbd> to list only strong suspects; potential false positives will be ignored.
+	Add <kbd><a href="', $script_name, '?ignorefp">?ignorefp</a></kbd> to list only strong suspects; potential false positives will be ignored.', /*
 	<br>
-	Add <kbd>?fixme</kbd> to the URL to allow the script to fix all files for you, except for potential false-positives and duplicate or undeclared globals. Still, beware!
+	Add <kbd>?fixme</kbd> to the URL to allow the script to fix all files for you, except for potential false-positives and duplicate or undeclared globals. Still, beware! */ '
 </p>
 
 <ol>';
