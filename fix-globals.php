@@ -117,15 +117,15 @@ function find_global_problems($real_globals = array(), $dir = '')
 
 		// Detect named functions and class methods.
 		// !! @todo: detect anonymous functions.
-		preg_match_all('~[\r\n](\t*)(?:private|protected|public|static| )*?function (\w+)([^}\r\n]+[\r\n]+\1.*?)[\r\n]+\1}~s', $php, $matches);
+		preg_match_all('~\v(\h*)(?:private|protected|public|static| )*?function (\w+)([^}\v]+\v+\1.*?)\v+\1}~s', $php, $matches);
 
 		// !! @todo: test this!
 		if (isset($_GET['fixme']))
-			preg_match_all('~[\r\n](\t*)(?:private|protected|public|static| )*?function (\w+)([^}\r\n]+[\r\n]+\1.*?)[\r\n]+\1}~s', $real_php, $real_matches);
+			preg_match_all('~\v(\h*)(?:private|protected|public|static| )*?function (\w+)([^}\v]+\v+\1.*?)\v+\1}~s', $real_php, $real_matches);
 
 		foreach ($matches[3] as $key => $val)
 		{
-			preg_match_all('~[\r\n{][\t ]*global (\$[^;]+);~', $val, $globs);
+			preg_match_all('~[\v{]\h*global (\$[^;]+);~', $val, $globs);
 			$globs[1] = isset($globs[1]) ? $globs[1] : array();
 
 			foreach ($globs[1] as $find_dupes)
@@ -183,7 +183,7 @@ function find_global_problems($real_globals = array(), $dir = '')
 						{
 							$real_ex = $real_matches[0][$key];
 							$real_matches[0][$key] = preg_replace(
-								'~(?<=[\r\n{])[\t ]*global \\' . $test_me . ';[\r\n]+~',
+								'~(?<=[\v{])\h*global \\' . $test_me . ';\v+~',
 								'',
 								preg_replace(
 									'~(, ?\\' . $test_me . '(?![a-zA-Z_])|\\' . $test_me . ', ?)~',
