@@ -19,10 +19,38 @@ $problems = 0;
 set_time_limit(300);
 @ini_set('xdebug.max_nesting_level', 300);
 
+// Folders that we don't want to waste time on.
+$ignored_folders = array(
+	'.git',
+	'gz',
+	'cache',
+	'clean',
+	'clean2',
+	'clean3',
+	'_own_',
+);
+
+// Known globals that we don't want to understimate.
+$known_globals = array(
+	'$txt',
+	'$context',
+	'$settings',
+	'$modSettings', // for SMF (forks or mainline)
+	'$theme', // for SMF (forks or mainline)
+	'$options',
+	'$board',
+	'$topic',
+	'$boarddir',
+	'$boardurl',
+	'$scripturl',
+	'$board_info',
+	'$action_list',
+);
+
 echo '<!DOCTYPE html>
 <html>
 <head>
-	<title>', $script_name, '</title>
+	<title>Globye.php</title>
 	<style>
 		body { font-family: Arial, sans-serif; color: #666; }
 		span { font: 700 17px monospace; }
@@ -38,7 +66,7 @@ echo '<!DOCTYPE html>
 </head>
 <body>
 
-<h1>', $script_name, '</h1>
+<h1>Globye.php</h1>
 <div>By Nao (Wedge.org)</div>
 <hr>
 
@@ -54,21 +82,7 @@ echo '<!DOCTYPE html>
 <ol>';
 
 // We're just going to provide a list of global variables commonly used in Wedge. Feel free to edit to your taste...
-find_global_problems(array(
-	'$txt',
-	'$context',
-	'$settings',
-	'$modSettings', // for SMF (forks or mainline)
-	'$theme', // for SMF (forks or mainline)
-	'$options',
-	'$board',
-	'$topic',
-	'$boarddir',
-	'$boardurl',
-	'$scripturl',
-	'$board_info',
-	'$action_list',
-));
+find_global_problems($known_globals, $ignored_folders);
 
 echo '</ol>';
 
@@ -80,7 +94,7 @@ else
 echo '</body>
 </html>';
 
-function find_global_problems($real_globals = array(), $dir = '')
+function find_global_problems($real_globals = array(), $ignored_folders = array(), $dir = '')
 {
 	global $root, $problems;
 
@@ -90,11 +104,11 @@ function find_global_problems($real_globals = array(), $dir = '')
 
 	foreach ($files as $file)
 	{
-		if ($file == '.' || $file == '..' || $file == '.git' || $file == 'other' || $file == 'cache')
+		if ($file == '.' || $file == '..' || in_array($file, $ignored_folders))
 			continue;
 		if (is_dir($dir . '/' . $file))
 		{
-			find_global_problems($real_globals, $dir . '/' . $file);
+			find_global_problems($real_globals, $ignored_folders, $dir . '/' . $file);
 			continue;
 		}
 		if (substr($file, -4) != '.php')
