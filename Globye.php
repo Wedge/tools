@@ -299,3 +299,62 @@ function find_next(&$php, $pos, $search_for)
 		return find_next($php, ++$next, $search_for);
 	return $next;
 }
+
+function find_functions($php, $pos = 0)
+{
+	$matches = array();
+//		preg_match_all('~(?<=[^\w])function\s(\w*)\s*\(([^{}]+)({(?' . '>[^{}]+|(?3))*})~s', $php, $matches);
+
+	while (true)
+	{
+		$next = stripos($php, 'function', $pos);
+		if ($next === false)
+			return $matches;
+		if (preg_match('~[^\s,{}]~', $php[$next - 1]) || !preg_match('~function\s(\w*)\s*\(([^{}]+){~i', substr($php, $next, 100)))
+		{
+			$pos = $next + 1;
+			continue;
+		}
+		$bracket = strpos($php, '{', $next);
+		$next_bracket = $bracket + 1;
+		$nums = 1;
+		// Now, find the next function declaration, add it to $matches, and delete it from $php so we don't get confused later.
+		while ($nums > 0)
+		{
+			$func = stripos($php, 'function', $next_bracket);
+			$opening = strpos($php, '{', $next_bracket);
+			$closing = strpos($php, '}', $next_bracket);
+			echo "f=$func, o=$opening, c=$closing ... ";
+			// Is there a nested function declaration, in here..?
+			if ($func !== false && (($opening === false || $func < $opening) && ($closing === false || $func < $closing)))
+			{
+				if (preg_match('~function\s(\w*)\s*\(([^{}]+){~i', substr($php, $next, 100)))
+				{
+					$nested_function = find_functions($php, $func);
+					$next_bracket = $func + $nested_function['length'] + 1;
+					$matches = array_merge($matches, $nested_function);
+					echo ' function found. ';
+					continue;
+				}
+			}
+			if ($closing !== false && ($opening === false || $closing < $opening))
+			{
+				$nums--;
+				$next_bracket = $closing + 1;
+				echo ' closing bracket found. ';
+			}
+			if ($closing !== false && $opening !== false && $opening < $closing)
+			{
+				$nums++;
+				$next_bracket = $opening + 1;
+				echo ' opening bracket found. ';
+			}
+			if ($closing === false)
+				break;
+		}
+		echo substr($php, $bracket, $next_bracket - 1 - $bracket), "\n\n\n\n\n\n\n\n\n---------------\n\n\n\n\n\n\n\n\n\n";
+		$pos = $next_bracket;
+	}
+
+	return $matches;
+}
