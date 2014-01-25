@@ -366,6 +366,4 @@ function find_functions(&$php, $pos = 0)
 		$matches[] = $item;
 		$pos = $next_bracket;
 	}
-
-	return $matches;
 }
