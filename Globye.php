@@ -300,17 +300,18 @@ function find_next(&$php, $pos, $search_for)
 	return $next;
 }
 
-function find_functions($php, $pos = 0)
+function find_functions(&$php, $pos = 0)
 {
 	$matches = array();
-//		preg_match_all('~(?<=[^\w])function\s(\w*)\s*\(([^{}]+)({(?' . '>[^{}]+|(?3))*})~s', $php, $matches);
 
 	while (true)
 	{
 		$next = stripos($php, 'function', $pos);
-		if ($next === false)
+		// Did we reach the end of the block, or maybe we're in a nested function and we've reached its end?
+		if ($next === false || (substr_count($count_brackets = substr($php, $pos, $next - $pos), '{') < substr_count($count_brackets, '}')))
 			return $matches;
-		if (preg_match('~[^\s,{}]~', $php[$next - 1]) || !preg_match('~function\s(\w*)\s*\(([^{}]+){~i', substr($php, $next, 100)))
+		$coming_up = substr($php, $next);
+		if (($next > 0 && preg_match('~\w~', $php[$next - 1])) || !preg_match('~^function(?:[\h\v](\w*)[\h\v]*)?\(([^{}]+)(?:[\h\v]*use[\h\v]*\(([^)]+)\)[\h\v]*)?{~i', $coming_up, $cur))
 		{
 			$pos = $next + 1;
 			continue;
@@ -321,22 +322,9 @@ function find_functions($php, $pos = 0)
 		// Now, find the next function declaration, add it to $matches, and delete it from $php so we don't get confused later.
 		while ($nums > 0)
 		{
-			$func = stripos($php, 'function', $next_bracket);
 			$opening = strpos($php, '{', $next_bracket);
 			$closing = strpos($php, '}', $next_bracket);
-			echo "f=$func, o=$opening, c=$closing ... ";
-			// Is there a nested function declaration, in here..?
-			if ($func !== false && (($opening === false || $func < $opening) && ($closing === false || $func < $closing)))
-			{
-				if (preg_match('~function\s(\w*)\s*\(([^{}]+){~i', substr($php, $next, 100)))
-				{
-					$nested_function = find_functions($php, $func);
-					$next_bracket = $func + $nested_function['length'] + 1;
-					$matches = array_merge($matches, $nested_function);
-					echo ' function found. ';
-					continue;
-				}
-			}
+			echo "o=$opening, c=$closing ... ";
 			if ($closing !== false && ($opening === false || $closing < $opening))
 			{
 				$nums--;
@@ -352,7 +340,30 @@ function find_functions($php, $pos = 0)
 			if ($closing === false)
 				break;
 		}
-		echo substr($php, $bracket, $next_bracket - 1 - $bracket), "\n\n\n\n\n\n\n\n\n---------------\n\n\n\n\n\n\n\n\n\n";
+
+		$item = $cur;
+		$item['pristine'] = substr($php, $bracket, $next_bracket - 1 - $bracket);
+
+		// Okay, now we've got our main function, we'll store a pristine version, and a version without its potential nested functions.
+		while ($nums > 0)
+		{
+			$func = stripos($php, 'function', $bracket);
+			// Is there a nested function declaration, in here..?
+			if ($func !== false && $func < $next_bracket)
+			{
+				if ($nested_function = find_functions($php, $func + 1))
+				{
+					$matches = array_merge($matches, $nested_function);
+					foreach ($nested_function as $remove)
+					{
+						$breaks = substr_count($nest, "\n") + substr_count($nest, "\r") - substr_count($nest, "\r\n");
+						$php = str_replace($nest, str_pad(str_repeat("\n", $breaks), strlen($nest)), $php);
+					}
+				}
+			}
+		}
+
+		$matches[] = $item;
 		$pos = $next_bracket;
 	}
 
