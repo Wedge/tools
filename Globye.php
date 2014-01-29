@@ -1,7 +1,6 @@
 <?php
 /**
  * Finds duplicate, undeclared or unused global variables.
- * Fixes unused globals when using the ?fixme query string.
  *
  * @package tools
  * @copyright 2013 René-Gilles Deberdt, wedge.org
@@ -12,7 +11,6 @@
 	To-do:
 		- Correctly handle globals declared in anonymous functions (PHP 5.3+) and create_function evals.
 		- Remove quotes from tests, so we don't find false positives in commented-out code.
-		- Fix duplicate and undeclared globals, instead of just unused globals.
 */
 
 $script_name = basename(__FILE__);
@@ -21,10 +19,38 @@ $problems = 0;
 set_time_limit(300);
 @ini_set('xdebug.max_nesting_level', 300);
 
+// Folders that we don't want to waste time on.
+$ignored_folders = array(
+	'.git',
+	'gz',
+	'cache',
+	'clean',
+	'clean2',
+	'clean3',
+	'_own_',
+);
+
+// Known globals that we don't want to understimate.
+$known_globals = array(
+	'$txt',
+	'$context',
+	'$settings',
+	'$modSettings', // for SMF (forks or mainline)
+	'$theme', // for SMF (forks or mainline)
+	'$options',
+	'$board',
+	'$topic',
+	'$boarddir',
+	'$boardurl',
+	'$scripturl',
+	'$board_info',
+	'$action_list',
+);
+
 echo '<!DOCTYPE html>
 <html>
 <head>
-	<title>', $script_name, '</title>
+	<title>Globye.php</title>
 	<style>
 		body { font-family: Arial, sans-serif; color: #666; }
 		span { font: 700 17px monospace; }
@@ -40,7 +66,7 @@ echo '<!DOCTYPE html>
 </head>
 <body>
 
-<h1>', $script_name, '</h1>
+<h1>Globye.php</h1>
 <div>By Nao (Wedge.org)</div>
 <hr>
 
@@ -51,28 +77,12 @@ echo '<!DOCTYPE html>
 	Add <kbd><a href="', $script_name, '?noclean">?noclean</a></kbd> to view a quick, dirty list of results that may generate more false positives.
 	<br>
 	Add <kbd><a href="', $script_name, '?ignorefp">?ignorefp</a></kbd> to list only strong suspects; potential false positives will be ignored.
-	<br>
-	Add <kbd>?fixme</kbd> to the URL to allow the script to fix all files for you, except for potential false-positives and duplicate or undeclared globals. Still, beware!
 </p>
 
 <ol>';
 
 // We're just going to provide a list of global variables commonly used in Wedge. Feel free to edit to your taste...
-find_global_problems(array(
-	'$txt',
-	'$context',
-	'$settings',
-	'$modSettings', // for SMF (forks or mainline)
-	'$theme', // for SMF (forks or mainline)
-	'$options',
-	'$board',
-	'$topic',
-	'$boarddir',
-	'$boardurl',
-	'$scripturl',
-	'$board_info',
-	'$action_list',
-));
+find_global_problems($known_globals, $ignored_folders);
 
 echo '</ol>';
 
@@ -84,7 +94,7 @@ else
 echo '</body>
 </html>';
 
-function find_global_problems($real_globals = array(), $dir = '')
+function find_global_problems($real_globals = array(), $ignored_folders = array(), $dir = '')
 {
 	global $root, $problems;
 
@@ -94,11 +104,11 @@ function find_global_problems($real_globals = array(), $dir = '')
 
 	foreach ($files as $file)
 	{
-		if ($file == '.' || $file == '..' || $file == '.git' || $file == 'other' || $file == 'cache')
+		if ($file == '.' || $file == '..' || in_array($file, $ignored_folders))
 			continue;
 		if (is_dir($dir . '/' . $file))
 		{
-			find_global_problems($real_globals, $dir . '/' . $file);
+			find_global_problems($real_globals, $ignored_folders, $dir . '/' . $file);
 			continue;
 		}
 		if (substr($file, -4) != '.php')
@@ -108,23 +118,19 @@ function find_global_problems($real_globals = array(), $dir = '')
 
 		// Remove comments, quotes and double quotes from the string.
 		// This makes the script about 5x to 10x slower, so if you just need a quick check, add the ?noclean parameter.
-		// A few alternative ways to remove these through regex, but they won't work together:
+		// A few alternative ways to remove these through regexes, but they won't work together:
 		// http://ideone.com/rLP1nq
 		// http://blog.stevenlevithan.com/archives/match-quoted-string
-		if (!isset($_GET['noclean']) || isset($_GET['fixme']))
+		if (!isset($_GET['noclean']))
 			$php = clean_me_up($php);
 
 		// Detect named functions and class methods.
 		// !! @todo: detect anonymous functions.
-		preg_match_all('~[\r\n](\t*)(?:private|protected|public|static| )*?function (\w+)([^}\r\n]+[\r\n]+\1.*?)[\r\n]+\1}~s', $php, $matches);
-
-		// !! @todo: test this!
-		if (isset($_GET['fixme']))
-			preg_match_all('~[\r\n](\t*)(?:private|protected|public|static| )*?function (\w+)([^}\r\n]+[\r\n]+\1.*?)[\r\n]+\1}~s', $real_php, $real_matches);
+		preg_match_all('~\v(\h*)(?:private|protected|public|static| )*?function (\w+)([^}\v]+\v+\1.*?)\v+\1}~s', $php, $matches);
 
 		foreach ($matches[3] as $key => $val)
 		{
-			preg_match_all('~[\r\n{][\t ]*global (\$[^;]+);~', $val, $globs);
+			preg_match_all('~[\v{]\h*global (\$[^;]+);~', $val, $globs);
 			$globs[1] = isset($globs[1]) ? $globs[1] : array();
 
 			foreach ($globs[1] as $find_dupes)
@@ -167,31 +173,10 @@ function find_global_problems($real_globals = array(), $dir = '')
 							echo '<li class="unused', $is_new ? ' new' : '', '">Unused global in <span>', str_replace($root, '', $dir), '/<span class="file">', $file, ':', $func_line + $glob_line + 3, '</span></span> (', $matches[2][$key], ') -- <span>', $test_me, '</span>';
 							if ($probably_false_positive)
 							{
-								if (!isset($_GET['fixme']))
-									echo '<br><em>The line above might be a false positive (<span>', $r, '</span>); it will be skipped during automatic fixes.</em></li>';
-								else
-									echo '<br><em>Skipping fix for the line above, as it may be a false positive (<span>', $r, '</span>); please check it yourself manually!</em></li>';
+								echo '<br><em>The line above might be a false positive (<span>', $r, '</span>).</em></li>';
 								continue;
 							}
 							echo '</li>';
-						}
-
-						// Add ?fixme to the URL after a dry run. The script will skip anything
-						// that looks suspicious, but you should still make a backup before.
-						if (isset($_GET['fixme']))
-						{
-							$real_ex = $real_matches[0][$key];
-							$real_matches[0][$key] = preg_replace(
-								'~(?<=[\r\n{])[\t ]*global \\' . $test_me . ';[\r\n]+~',
-								'',
-								preg_replace(
-									'~(, ?\\' . $test_me . '(?![a-zA-Z_])|\\' . $test_me . ', ?)~',
-									'',
-									$real_matches[0][$key]
-								)
-							);
-							$real_php = str_replace($real_ex, $real_matches[0][$key], $real_php);
-							file_put_contents($dir . '/' . $file, $real_php);
 						}
 					}
 				}
@@ -313,4 +298,72 @@ function find_next(&$php, $pos, $search_for)
 	if ($escaped)
 		return find_next($php, ++$next, $search_for);
 	return $next;
+}
+
+function find_functions(&$php, $pos = 0)
+{
+	$matches = array();
+
+	while (true)
+	{
+		$next = stripos($php, 'function', $pos);
+		// Did we reach the end of the block, or maybe we're in a nested function and we've reached its end?
+		if ($next === false || (substr_count($count_brackets = substr($php, $pos, $next - $pos), '{') < substr_count($count_brackets, '}')))
+			return $matches;
+		$coming_up = substr($php, $next);
+		if (($next > 0 && preg_match('~\w~', $php[$next - 1])) || !preg_match('~^function(?:[\h\v](\w*)[\h\v]*)?\(([^{}]+)(?:[\h\v]*use[\h\v]*\(([^)]+)\)[\h\v]*)?{~i', $coming_up, $cur))
+		{
+			$pos = $next + 1;
+			continue;
+		}
+		$bracket = strpos($php, '{', $next);
+		$next_bracket = $bracket + 1;
+		$nums = 1;
+		// Now, find the next function declaration, add it to $matches, and delete it from $php so we don't get confused later.
+		while ($nums > 0)
+		{
+			$opening = strpos($php, '{', $next_bracket);
+			$closing = strpos($php, '}', $next_bracket);
+			echo "o=$opening, c=$closing ... ";
+			if ($closing !== false && ($opening === false || $closing < $opening))
+			{
+				$nums--;
+				$next_bracket = $closing + 1;
+				echo ' closing bracket found. ';
+			}
+			if ($closing !== false && $opening !== false && $opening < $closing)
+			{
+				$nums++;
+				$next_bracket = $opening + 1;
+				echo ' opening bracket found. ';
+			}
+			if ($closing === false)
+				break;
+		}
+
+		$item = $cur;
+		$item['pristine'] = substr($php, $bracket, $next_bracket - 1 - $bracket);
+
+		// Okay, now we've got our main function, we'll store a pristine version, and a version without its potential nested functions.
+		while ($nums > 0)
+		{
+			$func = stripos($php, 'function', $bracket);
+			// Is there a nested function declaration, in here..?
+			if ($func !== false && $func < $next_bracket)
+			{
+				if ($nested_function = find_functions($php, $func + 1))
+				{
+					$matches = array_merge($matches, $nested_function);
+					foreach ($nested_function as $remove)
+					{
+						$breaks = substr_count($nest, "\n") + substr_count($nest, "\r") - substr_count($nest, "\r\n");
+						$php = str_replace($nest, str_pad(str_repeat("\n", $breaks), strlen($nest)), $php);
+					}
+				}
+			}
+		}
+
+		$matches[] = $item;
+		$pos = $next_bracket;
+	}
 }
