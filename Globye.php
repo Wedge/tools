@@ -124,13 +124,14 @@ function find_global_problems($real_globals = array(), $ignored_folders = array(
 		if (!isset($_GET['noclean']))
 			$php = clean_me_up($php);
 
-		// Detect named functions and class methods.
-		// !! @todo: detect anonymous functions.
-		preg_match_all('~\v(\h*)(?:private|protected|public|static| )*?function (\w+)([^}\v]+\v+\1.*?)\v+\1}~s', $php, $matches);
+		// Detect functions and class methods.
+		$matches = get_function_list($php);
 
-		foreach ($matches[3] as $key => $val)
+		foreach ($matches as $match)
 		{
-			preg_match_all('~[\v{]\h*global (\$[^;]+);~', $val, $globs);
+			preg_match_all('~(\$[a-zA-Z_][a-zA-Z0-9_]*)~', $match[2], $params);
+			$params = isset($params[1]) ? $params[1] : array();
+			preg_match_all('~\sglobal (\$[^;]+);~', $match['clean'], $globs);
 			$globs[1] = isset($globs[1]) ? $globs[1] : array();
 
 			foreach ($globs[1] as $find_dupes)
@@ -141,20 +142,20 @@ function find_global_problems($real_globals = array(), $ignored_folders = array(
 					$problems++;
 					$is_new = $file != $old_file;
 					$old_file = $file;
-					echo '<li class="duplicates', $is_new ? ' new' : '', '">Found duplicate globals in <span>', str_replace($root, '', $dir), '/<span class="file">', $file, '</span></span> (', $matches[2][$key], ') -- ', $find_dupes, '</li>';
+					echo '<li class="duplicates', $is_new ? ' new' : '', '">Found duplicate globals in <span>', str_replace($root, '', $dir), '/<span class="file">', $file, '</span></span> (', $match[1] ?: 'anonymous function', ') -- ', $find_dupes, '</li>';
 				}
 			}
 
 			// Get the final list of all declared globals in that particular function.
 			preg_match_all('~\$[a-zA-Z_]+~', implode(', ', $globs[1]), $there_we_are);
-			$val = str_replace($globs[0], '', $val);
+			$val = str_replace($globs[0], '', $match['clean']);
 			if (isset($there_we_are[0]))
 			{
 				foreach ($there_we_are[0] as $test_me)
 				{
 					if (!preg_match('~\\' . $test_me . '[^a-zA-Z_]~', $val))
 					{
-						$ex = $matches[0][$key];
+						$ex = $match['clean'];
 						$problems++;
 						$probably_false_positive =
 							((($r = '$$') && strpos($ex, '$$') !== false) ||
@@ -168,9 +169,9 @@ function find_global_problems($real_globals = array(), $ignored_folders = array(
 						{
 							$is_new = $file != $old_file;
 							$old_file = $file;
-							$func_line = substr_count(substr($php, 0, strpos($php, $matches[0][$key])), "\n");
-							$glob_line = substr_count(substr($matches[3][$key], 0, strpos($matches[3][$key], $test_me)), "\n");
-							echo '<li class="unused', $is_new ? ' new' : '', '">Unused global in <span>', str_replace($root, '', $dir), '/<span class="file">', $file, ':', $func_line + $glob_line + 3, '</span></span> (', $matches[2][$key], ') -- <span>', $test_me, '</span>';
+							$func_line = substr_count(substr($php, 0, $match['pos']), "\n");
+							$glob_line = substr_count(substr($match['pristine'], 0, strpos($match['pristine'], $test_me)), "\n");
+							echo '<li class="unused', $is_new ? ' new' : '', '">Unused global in <span>', str_replace($root, '', $dir), '/<span class="file">', $file, ':', $func_line + $glob_line + 3, '</span></span> (', $match[1] ?: 'anonymous function', ') -- <span>', $test_me, '</span>';
 							if ($probably_false_positive)
 							{
 								echo '<br><em>The line above might be a false positive (<span>', $r, '</span>).</em></li>';
@@ -181,41 +182,40 @@ function find_global_problems($real_globals = array(), $ignored_folders = array(
 					}
 				}
 			}
-			// Find undeclared globals. There might be false positives in this, if you're using a global's name as a local variable (e.g. $options, etc.)
+			// Find undeclared globals. There might be false positives in this, if you're using a generic global's name as a local variable (e.g. $options, etc.)
 			foreach ($real_globals as $real_global)
 			{
-				if ((!isset($there_we_are[0]) || !in_array($real_global, $there_we_are[0])) && preg_match('~\\' . $real_global . '[^a-zA-Z_]~', $val))
+				if (!in_array($real_global, $params) && (!isset($there_we_are[0]) || !in_array($real_global, $there_we_are[0])) && preg_match('~\\' . $real_global . '[^a-zA-Z_]~', $val))
 				{
 					// Is it on a line with a comment on it? Probably a false positive... (Unless you're using another instance, but you'll still have to fix manually.)
 					$in_foreach = preg_match('~foreach[\s(].*?\bas\b\s*(?:[^)=>]+=>\s*)?\\' . $real_global . '[^a-zA-Z_]~', $val);
-					$in_params = preg_match('~^\s*\((?:[^)]+[,\s])?\s*\\' . $real_global . '[^a-zA-Z_]~', $val);
 					$in_list = preg_match('~\slist\s*\((?:[^)]+[,\s])?\s*\\' . $real_global . '[^a-zA-Z_]~', $val);
 					$in_assign = preg_match('~\\' . $real_global . '\s*=[^=]~', $val);
 					$in_arrass = preg_match('~\\' . $real_global . '\[[^]]*]\s*=[^=]~', $val);
-					$probably_false_positive = $in_foreach || $in_params || $in_list || $in_assign || $in_arrass;
+					$probably_false_positive = $in_foreach || $in_list || $in_assign || $in_arrass;
 					$problems++;
 
 					if (!$probably_false_positive || !isset($_GET['ignorefp']))
 					{
 						$is_new = $file != $old_file;
 						$old_file = $file;
-						$func_line = substr_count(substr($php, 0, strpos($php, $matches[0][$key])), "\n");
-						$glob_line = substr_count(substr($matches[3][$key], 0, strpos($matches[3][$key], reset($there_we_are[0]))), "\n");
-						echo '<li class="undeclared', $is_new ? ' new' : '', '">Undeclared global in <span>', str_replace($root, '', $dir), '/<span class="file">', $file, ':', $func_line + $glob_line + 3, '</span></span> (', $matches[2][$key], ') -- <span>', $real_global, '</span>';
+						$func_line = substr_count(substr($php, 0, $match['pos']), "\n");
+						$glob_line = substr_count(substr($match['pristine'], 0, strpos($match['pristine'], reset($there_we_are[0]))), "\n");
+						echo '<li class="undeclared', $is_new ? ' new' : '', '">Undeclared global in <span>', str_replace($root, '', $dir), '/<span class="file">', $file, ':', $func_line + $glob_line + 3, '</span></span> (', $match[1] ?: 'anonymous function', ') -- <span>', $real_global, '</span>';
 						if ($probably_false_positive)
 						{
 							echo '<br><em>The line above might be a false positive (',
-								$in_params ? 'used as a parameter' :
+								$in_foreach ? 'found in a foreach' :
 								($in_assign ? 'initialized within function' :
 								($in_arrass ? 'initialized as implied array within function' :
-								($in_list ? 'initialized in a list() within function' :
-								'found in a ' . ($in_comment ? 'comment' : 'foreach')))), ').</em></li>';
+								($in_list ? 'initialized in a list() within function' : ''))), ').</em></li>';
 							continue;
 						}
 						echo '</li>';
 					}
 				}
 			}
+			flush();
 		}
 	}
 }
@@ -300,8 +300,19 @@ function find_next(&$php, $pos, $search_for)
 	return $next;
 }
 
-function find_functions(&$php, $pos = 0)
+function get_function_list($php)
 {
+	$matches = find_functions($php);
+	for ($i = 0, $c = count($matches); $i < $c; $i++)
+		for ($j = $i - 1; $j >= 0; $j--)
+			if (strpos($matches[$i]['clean'], $matches[$j]['pristine']) !== false)
+				$matches[$i]['clean'] = str_replace($matches[$j]['pristine'], '', $matches[$i]['clean']);
+	return $matches;
+}
+
+function find_functions($php, $offset = 0)
+{
+	$pos = 0;
 	$matches = array();
 
 	while (true)
@@ -310,58 +321,45 @@ function find_functions(&$php, $pos = 0)
 		// Did we reach the end of the block, or maybe we're in a nested function and we've reached its end?
 		if ($next === false || (substr_count($count_brackets = substr($php, $pos, $next - $pos), '{') < substr_count($count_brackets, '}')))
 			return $matches;
-		$coming_up = substr($php, $next);
-		if (($next > 0 && preg_match('~\w~', $php[$next - 1])) || !preg_match('~^function(?:[\h\v](\w*)[\h\v]*)?\(([^{}]+)(?:[\h\v]*use[\h\v]*\(([^)]+)\)[\h\v]*)?{~i', $coming_up, $cur))
+
+		if (($next > 0 && preg_match('~[\w$]~', $php[$next - 1])) || !preg_match('~^function(?:[\h\v](\w*)[\h\v]*)?\(([^{}]+){~i', substr($php, $next), $cur))
 		{
 			$pos = $next + 1;
 			continue;
 		}
 		$bracket = strpos($php, '{', $next);
 		$next_bracket = $bracket + 1;
-		$nums = 1;
+
 		// Now, find the next function declaration, add it to $matches, and delete it from $php so we don't get confused later.
+		$nums = 1;
 		while ($nums > 0)
 		{
 			$opening = strpos($php, '{', $next_bracket);
 			$closing = strpos($php, '}', $next_bracket);
-			echo "o=$opening, c=$closing ... ";
 			if ($closing !== false && ($opening === false || $closing < $opening))
 			{
 				$nums--;
 				$next_bracket = $closing + 1;
-				echo ' closing bracket found. ';
 			}
 			if ($closing !== false && $opening !== false && $opening < $closing)
 			{
 				$nums++;
 				$next_bracket = $opening + 1;
-				echo ' opening bracket found. ';
 			}
 			if ($closing === false)
 				break;
 		}
 
 		$item = $cur;
-		$item['pristine'] = substr($php, $bracket, $next_bracket - 1 - $bracket);
+		$item['pos'] = $offset + $bracket;
 
-		// Okay, now we've got our main function, we'll store a pristine version, and a version without its potential nested functions.
-		while ($nums > 0)
-		{
-			$func = stripos($php, 'function', $bracket);
-			// Is there a nested function declaration, in here..?
-			if ($func !== false && $func < $next_bracket)
-			{
-				if ($nested_function = find_functions($php, $func + 1))
-				{
-					$matches = array_merge($matches, $nested_function);
-					foreach ($nested_function as $remove)
-					{
-						$breaks = substr_count($nest, "\n") + substr_count($nest, "\r") - substr_count($nest, "\r\n");
-						$php = str_replace($nest, str_pad(str_repeat("\n", $breaks), strlen($nest)), $php);
-					}
-				}
-			}
-		}
+		// Okay, now we've got our main function, we'll store a pristine version, and a version we'll later gut to remove its nested functions.
+		$item['clean'] = substr($php, $bracket, $next_bracket - $bracket);
+		$item['pristine'] = substr($php, $next, $next_bracket - $next);
+
+		// Is there a nested function declaration, in here..?
+		if (stripos($item['clean'], 'function') !== false)
+			$matches = array_merge($matches, find_functions($item['clean'], $bracket));
 
 		$matches[] = $item;
 		$pos = $next_bracket;
