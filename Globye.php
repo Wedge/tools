@@ -24,10 +24,6 @@ $ignored_folders = array(
 	'.git',
 	'gz',
 	'cache',
-	'clean',
-	'clean2',
-	'clean3',
-	'_own_',
 );
 
 // Known globals that we don't want to understimate.
