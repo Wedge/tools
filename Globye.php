@@ -16,8 +16,9 @@
 $script_name = basename(__FILE__);
 $root = dirname(__FILE__);
 $problems = 0;
-set_time_limit(300);
 @ini_set('xdebug.max_nesting_level', 300);
+if (function_exists('set_time_limit') && is_callable('set_time_limit')) // Can't be too careful with this one...
+	@set_time_limit(300);
 
 // Folders that we don't want to waste time on.
 $ignored_folders = array(
@@ -239,12 +240,14 @@ function clean_me_up($php)
 		}
 		// We can't skip double quotes because they might hold parsable variables.
 		// So, we'll just find the end of that string, and then skip to the rest.
+		// Still, we need to ensure it doesn't hold {} characters.
 		elseif ($look_for == '"')
 		{
-			$next = find_next($php, $next + 1, '"');
-			if ($next === false)
+			$end = find_next($php, $next + 1, '"');
+			if ($end === false)
 				return $php;
-			$pos = $next + 1;
+			$php = substr_replace($php, strtr(substr($php, $next, $end - $next), '{}', '  '), $next, $end - $next);
+			$pos = $end + 1;
 			continue;
 		}
 
