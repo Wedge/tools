@@ -199,7 +199,9 @@ function find_global_problems($real_globals = array(), $ignored_folders = array(
 					$problems++;
 					$is_new = $file != $old_file;
 					$old_file = $file;
-					echo '<li class="duplicates', $is_new ? ' new' : '', '">Duplicate globals in <span>', str_replace($root, '', $dir), '/<span class="file">', $file, '</span></span> (', $match[1] ?: 'anonymous function', ') -- ', $find_dupes, '</li>';
+					$func_line = substr_count(substr($php, 0, $match['pos']), "\n");
+					$glob_line = substr_count(substr($match['pristine'], 0, strpos($match['pristine'], $test_me)), "\n");
+					echo '<li class="duplicates', $is_new ? ' new' : '', '">Duplicate globals in <span>', str_replace($root, '', $dir), '/<span class="file">', $file, ':', $func_line + $glob_line, '</span></span> (', $match[1] ?: 'anonymous function', ') -- ', $find_dupes, '</li>';
 
 					if (isset($_GET['fixme']) && strpos($match['clean'], 'global') !== false)
 					{
@@ -241,7 +243,7 @@ function find_global_problems($real_globals = array(), $ignored_folders = array(
 							$old_file = $file;
 							$func_line = substr_count(substr($php, 0, $match['pos']), "\n");
 							$glob_line = substr_count(substr($match['pristine'], 0, strpos($match['pristine'], $test_me)), "\n");
-							echo '<li class="unused', $is_new ? ' new' : '', '">Unused global in <span>', str_replace($root, '', $dir), '/<span class="file">', $file, ':', $func_line + $glob_line + 3, '</span></span> (', $match[1] ?: 'anonymous function', ') -- <span>', $test_me, '</span>';
+							echo '<li class="unused', $is_new ? ' new' : '', '">Unused global in <span>', str_replace($root, '', $dir), '/<span class="file">', $file, ':', $func_line + $glob_line, '</span></span> (', $match[1] ?: 'anonymous function', ') -- <span>', $test_me, '</span>';
 							if ($probably_false_positive)
 							{
 								echo '<br><em>The line above might be a false positive (<span>', $r, '</span>).</em></li>';
@@ -288,8 +290,8 @@ function find_global_problems($real_globals = array(), $ignored_folders = array(
 						$is_new = $file != $old_file;
 						$old_file = $file;
 						$func_line = substr_count(substr($php, 0, $match['pos']), "\n");
-						$glob_line = substr_count(substr($match['pristine'], 0, strpos($match['pristine'], reset($there_we_are[0]))), "\n");
-						echo '<li class="undeclared', $is_new ? ' new' : '', '">Undeclared global in <span>', str_replace($root, '', $dir), '/<span class="file">', $file, ':', $func_line + $glob_line + 3, '</span></span> (', $match[1] ?: 'anonymous function', ') -- <span>', $real_global, '</span>';
+						$glob_line = substr_count(substr($match['pristine'], 0, strpos($match['pristine'], $real_global)), "\n");
+						echo '<li class="undeclared', $is_new ? ' new' : '', '">Undeclared global in <span>', str_replace($root, '', $dir), '/<span class="file">', $file, ':', $func_line + $glob_line, '</span></span> (', $match[1] ?: 'anonymous function', ') -- <span>', $real_global, '</span>';
 						if ($probably_false_positive)
 						{
 							echo '<br><em>The line above might be a false positive (',
