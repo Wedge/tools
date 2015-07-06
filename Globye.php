@@ -5,6 +5,8 @@
  * @package tools
  * @copyright 2013 René-Gilles Deberdt, wedge.org
  * @license MIT
+ *
+ * Modifications 2015 by Feline, portamx.com
  */
 
 /*
@@ -13,9 +15,32 @@
 		- Remove quotes from tests, so we don't find false positives in commented-out code.
 */
 
+/*
+	Modifications by Feline
+		- if no additional option is given, only the help screen is shown.
+		- added option ?scan to scan all files in the current folder and his subfolder.
+		- added option ?file=filename to scan only the given file.
+		- added option ?path=path_to_scan to scan all files in the given folder and his subfolder.
+		- added option ?fixme to allow the script to fix all found problems exept false-positives.
+			In this case a backup (filename.php.timestamp) is created if any changed.
+		- added option ?nobackup .. uhm .. I think, you don't use this until you love high risk *g*
+*/
+
 $script_name = basename(__FILE__);
 $root = dirname(__FILE__);
+if (isset($_GET['path']))
+{
+	if (substr($_GET['path'], 0, 1) == '/')
+		$dir = $root . $_GET['path'];
+	else
+		$dir = $_GET['path'];
+}
+else
+	$dir = $root;
+$file = (isset($_GET['file']) ? $_GET['file'] : '');
 $problems = 0;
+$fixes = 0;
+
 @ini_set('xdebug.max_nesting_level', 300);
 if (function_exists('set_time_limit') && is_callable('set_time_limit')) // Can't be too careful with this one...
 	@set_time_limit(300);
@@ -42,6 +67,13 @@ $known_globals = array(
 	'$scripturl',
 	'$board_info',
 	'$action_list',
+	'$language', // for SMF (forks or mainline)
+	'$sourcedir', // for SMF (forks or mainline)
+	'$themedir', // for SMF (forks or mainline)
+	'$themeurl', // for SMF (forks or mainline)
+	'$user_info', // for SMF (forks or mainline)
+	'$smcFunc', // for SMF (forks or mainline)
+	'$cachedir', // for SMF (forks or mainline)
 );
 
 echo '<!DOCTYPE html>
@@ -55,49 +87,79 @@ echo '<!DOCTYPE html>
 		.new { margin-top: 8px; }
 		em { color: #c30; }
 		li { padding: 3px 0 3px 8px; }
-
-		.duplicates { background: linear-gradient(to right, #fcc, #fff 30px); }
-		.undeclared { background: linear-gradient(to right, #ccf, #fff 30px); }
-		.unused     { background: linear-gradient(to right, #bea, #fff 30px); }
+		kbd { font-size: 17px; font-weight: bold; }
+		samp { font-size: 17px; font-weight: bold; }
+		h1 { font-size: 18px; font-weight: bold; }
+		.duplicates { background: linear-gradient(to right, #fcc, #fff 100px); }
+		.undeclared { background: linear-gradient(to right, #ccf, #fff 100px); }
+		.unused     { background: linear-gradient(to right, #bea, #fff 100px); }
 	</style>
 </head>
 <body>
 
 <h1>Globye.php</h1>
-<div>By Nao (Wedge.org)</div>
-<hr>
+<div>By Nao (Wedge.org), modifications by Feline (PortaMx.com)</div>
+<hr>';
 
+if (empty($_GET))
+{
+	echo '
 <p>
 	This script will list all PHP files in the <samp>', $root, '</samp> folder that have duplicate, unneeded global declarations or undeclared globals.
 <p>
 <p>
-	Add <kbd><a href="', $script_name, '?noclean">?noclean</a></kbd> to view a quick, dirty list of results that may generate more false positives.
-	<br>
-	Add <kbd><a href="', $script_name, '?ignorefp">?ignorefp</a></kbd> to list only strong suspects; potential false positives will be ignored.
+	Add <kbd>?path=/relative</kbd> or <kbd>?path=absolute</kbd> to scan only the given path and his subfolder.<br />
+	Add <kbd>?file=your_phpfile.php</kbd> to allow the script to scan only the given file.<br />
+	Add <kbd>?noclean</kbd> to view a quick, dirty list of results that may generate more false positives.
+	(Ignored, if the <kbd>fixme</kbd> option is used).<br />
+	Add <kbd>?ignorefp</kbd> to list only strong suspects; potential false positives will be ignored.<br />
+	Add <kbd>?fixme</kbd> to allow the script to fix all files, except for potential false-positives. A backup (*.php.timestamp) is created if a file is modified.<br />
+	Add <kbd>?nobackup</kbd> if you don\'t make a backup if any changed during "fixme". Use this at your own risk !!!<br />
+	If you use more then one option, use the ampersand (&) for the additional option, like <kbd>path=/Sources&file=Subs.php</kbd><br /><br />
+	If you don\'t use any option, add <kbd>?scan</kbd> to allow the script to scan all files in the current folder and all subfolder.<hr />
 </p>
+</body>
+</html>';
+	exit;
+}
 
+echo '
+<h1>Scanning: ', $dir , (isset($_GET['file']) ? '/'. $_GET['file'] : ''), '</h1>
 <ol>';
 
 // We're just going to provide a list of global variables commonly used in Wedge. Feel free to edit to your taste...
-find_global_problems($known_globals, $ignored_folders);
+find_global_problems($known_globals, $ignored_folders, $dir, $file);
 
 echo '</ol>';
 
 if (!$problems)
 	echo '<p>No problems found, congratulations!</p>';
 else
-	echo '<p>', $problems, ' problems found, including potential false positives.</p>';
+{
+	if(!isset($_GET['ignorefp']))
+		echo '<p>', $problems, ' problems found, including potential false positives.<br />';
+	else
+		echo '<p>', $problems, ' problems found.<br />';
 
+	if($fixes > 0)
+		echo $fixes, ' problems fixed.';
+	echo '</p>';
+}
 echo '</body>
 </html>';
 
-function find_global_problems($real_globals = array(), $ignored_folders = array(), $dir = '')
+function find_global_problems($real_globals = array(), $ignored_folders = array(), $dir = '', $file = '')
 {
-	global $root, $problems;
+	global $root, $problems, $fixes;
 
 	$old_file = '';
 	$dir = $dir ? $dir : $root;
-	$files = scandir($dir);
+	if (empty($file))
+		$files = scandir($dir);
+	else
+		$files[0] = $file;
+
+	$modifyTime = time();
 
 	foreach ($files as $file)
 	{
@@ -112,20 +174,18 @@ function find_global_problems($real_globals = array(), $ignored_folders = array(
 			continue;
 
 		$php = $real_php = file_get_contents($dir . '/' . $file);
-
-		// Remove comments, quotes and double quotes from the string.
-		// This makes the script about 5x to 10x slower, so if you just need a quick check, add the ?noclean parameter.
-		// A few alternative ways to remove these through regexes, but they won't work together:
-		// http://ideone.com/rLP1nq
-		// http://blog.stevenlevithan.com/archives/match-quoted-string
-		if (!isset($_GET['noclean']))
-			$php = clean_me_up($php);
+		$fixes = 0;
 
 		// Detect functions and class methods.
 		$matches = get_function_list($php);
 
 		foreach ($matches as $match)
 		{
+			// Remove comments, quotes and double quotes from the string.
+			// This makes the script about 5x to 10x slower, so if you just need a quick check, add the ?noclean parameter.
+			if (!isset($_GET['noclean']) || isset($_GET['fixme']))
+				$match['clean'] = clean_me_up($match['clean']);
+
 			preg_match_all('~(\$[a-zA-Z_][a-zA-Z0-9_]*)~', $match[2], $params);
 			$params = isset($params[1]) ? $params[1] : array();
 			preg_match_all('~\sglobal (\$[^;]+);~', $match['clean'], $globs);
@@ -139,7 +199,20 @@ function find_global_problems($real_globals = array(), $ignored_folders = array(
 					$problems++;
 					$is_new = $file != $old_file;
 					$old_file = $file;
-					echo '<li class="duplicates', $is_new ? ' new' : '', '">Found duplicate globals in <span>', str_replace($root, '', $dir), '/<span class="file">', $file, '</span></span> (', $match[1] ?: 'anonymous function', ') -- ', $find_dupes, '</li>';
+					echo '<li class="duplicates', $is_new ? ' new' : '', '">Duplicate globals in <span>', str_replace($root, '', $dir), '/<span class="file">', $file, '</span></span> (', $match[1] ?: 'anonymous function', ') -- ', $find_dupes, '</li>';
+
+					if (isset($_GET['fixme']) && strpos($match['clean'], 'global') !== false)
+					{
+						$funcglobs = implode(', ', array_unique($dupes));
+						$globs[2] = explode(', ', $funcglobs);
+						$tmp = $match['pristine'];
+						if(strpos($match['clean'], 'global') !== false)
+						{
+							$match['pristine'] = preg_replace('~global[^\;]*\;~', 'global '. $funcglobs .';', $match['pristine']);
+							$php = str_replace($tmp, $match['pristine'], $php);
+							$fixes++;
+						}
+					}
 				}
 			}
 
@@ -173,6 +246,24 @@ function find_global_problems($real_globals = array(), $ignored_folders = array(
 							{
 								echo '<br><em>The line above might be a false positive (<span>', $r, '</span>).</em></li>';
 								continue;
+							}
+							else
+							{
+								if (isset($_GET['fixme']) && strpos($match['clean'], 'global') !== false)
+								{
+									$tmp = $match['pristine'];
+									$match['pristine'] = preg_replace(
+										'~[\t\s]*global \\' . $test_me . ';[\r\n]~',
+										'',
+										preg_replace(
+											'~(, ?\\' . $test_me . '(?![a-zA-Z_])|\\' . $test_me . ', ?)~',
+											'',
+											$match['pristine']
+										)
+									);
+									$php = str_replace($tmp, $match['pristine'], $php);
+									$fixes++;
+								}
 							}
 							echo '</li>';
 						}
@@ -208,10 +299,48 @@ function find_global_problems($real_globals = array(), $ignored_folders = array(
 								($in_list ? 'initialized in a list() within function' : ''))), ').</em></li>';
 							continue;
 						}
+						else
+						{
+							if (isset($_GET['fixme']))
+							{
+								$tmp = $match['pristine'];
+								$func = substr($match['pristine'], strpos($match['pristine'], 'function'), strpos($match['pristine'], '{') +1);
+
+								// any global in the clean area?
+								if(strpos($match['clean'], 'global') === false)
+								{
+									// no, remove commented globals
+									$match['pristine'] = preg_replace('~[^\/]\/\*[^g]*global[^\;]*;[^\*].?\*\/[\r\n]+~', '', $match['pristine']);
+									$match['pristine'] = preg_replace('~[\n\t\s\/]+global[^\;]*;[\r\n]+~', '', $match['pristine']);
+
+									// add one to the clean area
+									$func = substr($match['clean'], strpos($match['clean'], 'function'), strpos($match['clean'], '{') +1);
+									$match['clean'] = preg_replace('~'. preg_quote($func) .'~', $func. "\n\t" .'global '. $real_global .";\n", $match['clean']);
+
+									// insert missing globals
+									$func = substr($match['pristine'], strpos($match['pristine'], 'function'), strpos($match['pristine'], '{') +1);
+									$match['pristine'] = preg_replace('~'. preg_quote($func) .'~', $func. "\n\t" .'global '. $real_global .";\n", $match['pristine']);
+								}
+								else
+									$match['pristine'] = preg_replace('~global~', 'global '. $real_global .',', $match['pristine']);
+
+								$php = str_replace($tmp, $match['pristine'], $php);
+								$fixes++;
+							}
+						}
 						echo '</li>';
 					}
 				}
 			}
+
+			// if we have fixes ..
+			if (isset($_GET['fixme']) && !empty($fixes))
+			{
+				file_put_contents($dir . '/' . $file, $php);
+				if (!isset($_GET['nobackup']))
+					file_put_contents($dir . '/' . $file . '.' . $modifyTime, $real_php);
+			}
+
 			flush();
 		}
 	}
@@ -364,3 +493,4 @@ function find_functions($php, $offset = 0)
 		$pos = $next_bracket;
 	}
 }
+?>
