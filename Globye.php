@@ -24,19 +24,22 @@
 		- added option ?fixme to allow the script to fix all found problems exept false-positives.
 			In this case a backup (filename.php.timestamp) is created if any changed.
 		- added option ?nobackup .. uhm .. I think, you don't use this until you love high risk *g*
+		- added a function to stripout inline Javascript functions
 */
 
 $script_name = basename(__FILE__);
-$root = dirname(__FILE__);
+$root = $_SERVER['DOCUMENT_ROOT'];
 if (isset($_GET['path']))
 {
 	if (substr($_GET['path'], 0, 1) == '/')
-		$dir = $root . $_GET['path'];
+		$dir = $root . substr($_GET['path'], 1);
 	else
 		$dir = $_GET['path'];
 }
 else
 	$dir = $root;
+
+$dir = $basedir = str_replace('\\', '/', realpath($dir));
 $file = (isset($_GET['file']) ? $_GET['file'] : '');
 $problems = 0;
 $fixes = 0;
@@ -74,6 +77,7 @@ $known_globals = array(
 	'$user_info', // for SMF (forks or mainline)
 	'$smcFunc', // for SMF (forks or mainline)
 	'$cachedir', // for SMF (forks or mainline)
+	'$maintenance', // for SMF (forks or mainline)
 );
 
 echo '<!DOCTYPE html>
@@ -90,9 +94,9 @@ echo '<!DOCTYPE html>
 		kbd { font-size: 17px; font-weight: bold; }
 		samp { font-size: 17px; font-weight: bold; }
 		h1 { font-size: 18px; font-weight: bold; }
-		.duplicates { background: linear-gradient(to right, #fcc, #fff 100px); }
-		.undeclared { background: linear-gradient(to right, #ccf, #fff 100px); }
-		.unused     { background: linear-gradient(to right, #bea, #fff 100px); }
+		.duplicates { background: linear-gradient(to right, #fcc, #fff 80px); }
+		.undeclared { background: linear-gradient(to right, #ccf, #fff 90px); }
+		.unused     { background: linear-gradient(to right, #bea, #fff 65px); }
 	</style>
 </head>
 <body>
@@ -106,9 +110,10 @@ if (empty($_GET))
 	echo '
 <p>
 	This script will list all PHP files in the <samp>', $root, '</samp> folder that have duplicate, unneeded global declarations or undeclared globals.
+</p>
 <p>
-<p>
-	Add <kbd>?path=/relative</kbd> or <kbd>?path=absolute</kbd> to scan only the given path and his subfolder.<br />
+	Add <kbd>?path=/relative</kbd> or <kbd>?path=absolute</kbd> to scan only the given path and his subfolder.
+	(Base path for relative: <kbd>' . $_SERVER['DOCUMENT_ROOT'] . '</kbd>).<br />
 	Add <kbd>?file=your_phpfile.php</kbd> to allow the script to scan only the given file.<br />
 	Add <kbd>?noclean</kbd> to view a quick, dirty list of results that may generate more false positives.
 	(Ignored, if the <kbd>fixme</kbd> option is used).<br />
@@ -124,11 +129,11 @@ if (empty($_GET))
 }
 
 echo '
-<h1>Scanning: ', $dir , (isset($_GET['file']) ? '/'. $_GET['file'] : ''), '</h1>
+<h1>Searching: ', $dir , (isset($_GET['file']) ? '/'. $_GET['file'] : ''), '</h1>
 <ol>';
 
 // We're just going to provide a list of global variables commonly used in Wedge. Feel free to edit to your taste...
-find_global_problems($known_globals, $ignored_folders, $dir, $file);
+find_global_problems($known_globals, $ignored_folders, $dir, $file, $basedir);
 
 echo '</ol>';
 
@@ -148,12 +153,11 @@ else
 echo '</body>
 </html>';
 
-function find_global_problems($real_globals = array(), $ignored_folders = array(), $dir = '', $file = '')
+function find_global_problems($real_globals = array(), $ignored_folders = array(), $dir = '', $file = '', $basedir = '')
 {
 	global $root, $problems, $fixes;
 
 	$old_file = '';
-	$dir = $dir ? $dir : $root;
 	if (empty($file))
 		$files = scandir($dir);
 	else
@@ -167,7 +171,7 @@ function find_global_problems($real_globals = array(), $ignored_folders = array(
 			continue;
 		if (is_dir($dir . '/' . $file))
 		{
-			find_global_problems($real_globals, $ignored_folders, $dir . '/' . $file);
+			find_global_problems($real_globals, $ignored_folders, $dir . '/' . $file, '', $basedir);
 			continue;
 		}
 		if (substr($file, -4) != '.php')
@@ -191,6 +195,10 @@ function find_global_problems($real_globals = array(), $ignored_folders = array(
 			preg_match_all('~\sglobal (\$[^;]+);~', $match['clean'], $globs);
 			$globs[1] = isset($globs[1]) ? $globs[1] : array();
 
+			$curdir =  str_replace($basedir, '', $dir);
+			if(!empty($curdir))
+				$curdir = substr($curdir . '/', 1);
+
 			foreach ($globs[1] as $find_dupes)
 			{
 				$dupes = array_map('trim', explode(',', $find_dupes));
@@ -201,7 +209,7 @@ function find_global_problems($real_globals = array(), $ignored_folders = array(
 					$old_file = $file;
 					$func_line = substr_count(substr($php, 0, $match['pos']), "\n");
 					$glob_line = substr_count(substr($match['pristine'], 0, strpos($match['pristine'], $test_me)), "\n");
-					echo '<li class="duplicates', $is_new ? ' new' : '', '">Duplicate globals in <span>', str_replace($root, '', $dir), '/<span class="file">', $file, ':', $func_line + $glob_line, '</span></span> (', $match[1] ?: 'anonymous function', ') -- ', $find_dupes, '</li>';
+					echo '<li class="duplicates', $is_new ? ' new' : '', '">Duplicate globals in <span>', str_replace($basedir, '', $dir), '<span class="file">', $file, ':', $func_line + $glob_line, '</span></span> (', $match[1] ?: 'anonymous function', ') -- ', $find_dupes, '</li>';
 
 					if (isset($_GET['fixme']) && strpos($match['clean'], 'global') !== false)
 					{
@@ -222,7 +230,7 @@ function find_global_problems($real_globals = array(), $ignored_folders = array(
 			preg_match_all('~\$[a-zA-Z_]+~', implode(', ', $globs[1]), $there_we_are);
 			$val = str_replace($globs[0], '', $match['clean']);
 			if (isset($there_we_are[0]))
-			{
+			{                
 				foreach ($there_we_are[0] as $test_me)
 				{
 					if (!preg_match('~\\' . $test_me . '[^a-zA-Z_]~', $val))
@@ -243,7 +251,7 @@ function find_global_problems($real_globals = array(), $ignored_folders = array(
 							$old_file = $file;
 							$func_line = substr_count(substr($php, 0, $match['pos']), "\n");
 							$glob_line = substr_count(substr($match['pristine'], 0, strpos($match['pristine'], $test_me)), "\n");
-							echo '<li class="unused', $is_new ? ' new' : '', '">Unused global in <span>', str_replace($root, '', $dir), '/<span class="file">', $file, ':', $func_line + $glob_line, '</span></span> (', $match[1] ?: 'anonymous function', ') -- <span>', $test_me, '</span>';
+							echo '<li class="unused', $is_new ? ' new' : '', '">Unused global in <span>', $curdir , '<span class="file">', $file, ':', $func_line + $glob_line, '</span></span> (', $match[1] ?: 'anonymous function', ') -- <span>', $test_me, '</span>';
 							if ($probably_false_positive)
 							{
 								echo '<br><em>The line above might be a false positive (<span>', $r, '</span>).</em></li>';
@@ -289,9 +297,9 @@ function find_global_problems($real_globals = array(), $ignored_folders = array(
 					{
 						$is_new = $file != $old_file;
 						$old_file = $file;
-						$func_line = substr_count(substr($php, 0, $match['pos']), "\n");
+						$func_line = substr_count(substr($php, 0, strpos($php, $match[0])), "\n");
 						$glob_line = substr_count(substr($match['pristine'], 0, strpos($match['pristine'], $real_global)), "\n");
-						echo '<li class="undeclared', $is_new ? ' new' : '', '">Undeclared global in <span>', str_replace($root, '', $dir), '/<span class="file">', $file, ':', $func_line + $glob_line, '</span></span> (', $match[1] ?: 'anonymous function', ') -- <span>', $real_global, '</span>';
+						echo '<li class="undeclared', $is_new ? ' new' : '', '">Undeclared global in <span>', $curdir, '<span class="file">', $file, ':', $func_line + $glob_line +1, '</span></span> (', $match[1] ?: 'anonymous function', ') -- <span>', $real_global, '</span>';
 						if ($probably_false_positive)
 						{
 							echo '<br><em>The line above might be a false positive (',
@@ -432,7 +440,7 @@ function find_next(&$php, $pos, $search_for)
 
 function get_function_list($php)
 {
-	$matches = find_functions($php);
+	$matches = find_functions($php, 0);
 	for ($i = 0, $c = count($matches); $i < $c; $i++)
 		for ($j = $i - 1; $j >= 0; $j--)
 			if (strpos($matches[$i]['clean'], $matches[$j]['pristine']) !== false)
@@ -440,14 +448,68 @@ function get_function_list($php)
 	return $matches;
 }
 
+function find_javascript($php)
+{
+	$script = array();
+	$pos = 0;
+
+	$scriptstart = stripos($php, '<script', $pos);
+	if ($scriptstart !== false)
+	{
+		$scriptend = stripos($php, '</script>', $scriptstart);
+		$pos = $scriptstart;
+		while ($pos < $scriptend)
+		{
+			$pos = stripos($php, 'function', $pos);
+			if ($pos !== false && $pos < $scriptend)
+			{
+				$func = $pos;
+				$pos = stripos($php, '{', $func) +1;
+				$open = 1;
+				$close = 0;
+				while ($open != $close)
+				{
+					$pos = stripos($php, '}', $pos);
+					if ($pos !== false && $pos < $scriptend)
+						$close++;
+
+					if ($open != $close)
+					{
+						$pos = stripos($php, '{', $pos);
+						if ($pos !== false && $pos < $scriptend)
+							$open++;
+					}
+				}
+				$script[] = array('start' => $func, 'end' => $pos);
+			}
+			else
+				break;
+		}
+	}
+	return $script;
+}
+
 function find_functions($php, $offset = 0)
 {
 	$pos = 0;
 	$matches = array();
+	$script = find_javascript($php);
 
 	while (true)
 	{
 		$next = stripos($php, 'function', $pos);
+
+		// ignore globals in embedded javascript functions()
+		foreach($script as $scriptpos)
+		{
+			if($next >= $scriptpos['start'] && $next < $scriptpos['end'])
+			{
+					$pos = $scriptpos['end'];
+					$next = stripos($php, 'function', $pos);
+					break;
+			}
+		}
+
 		// Did we reach the end of the block, or maybe we're in a nested function and we've reached its end?
 		if ($next === false || (substr_count($count_brackets = substr($php, $pos, $next - $pos), '{') < substr_count($count_brackets, '}')))
 			return $matches;
