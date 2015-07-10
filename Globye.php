@@ -28,7 +28,7 @@
 */
 
 $script_name = basename(__FILE__);
-$root = $_SERVER['DOCUMENT_ROOT'];
+$root = $dir = $_SERVER['DOCUMENT_ROOT'];
 if (isset($_GET['path']))
 {
 	if (substr($_GET['path'], 0, 1) == '/')
@@ -36,10 +36,7 @@ if (isset($_GET['path']))
 	else
 		$dir = $_GET['path'];
 }
-else
-	$dir = $root;
-
-$dir = $basedir = str_replace('\\', '/', realpath($dir));
+$dir = $basedir = str_replace('\\', '/', $dir);
 $file = (isset($_GET['file']) ? $_GET['file'] : '');
 $problems = 0;
 $fixes = 0;
@@ -133,7 +130,7 @@ echo '
 <ol>';
 
 // We're just going to provide a list of global variables commonly used in Wedge. Feel free to edit to your taste...
-find_global_problems($known_globals, $ignored_folders, $dir, $file, $basedir);
+find_global_problems($known_globals, $ignored_folders, $dir, $file);
 
 echo '</ol>';
 
@@ -153,9 +150,9 @@ else
 echo '</body>
 </html>';
 
-function find_global_problems($real_globals = array(), $ignored_folders = array(), $dir = '', $file = '', $basedir = '')
+function find_global_problems($real_globals = array(), $ignored_folders = array(), $dir = '', $file = '')
 {
-	global $root, $problems, $fixes;
+	global $root, $problems, $fixes, $basedir;
 
 	$old_file = '';
 	if (empty($file))
@@ -171,7 +168,7 @@ function find_global_problems($real_globals = array(), $ignored_folders = array(
 			continue;
 		if (is_dir($dir . '/' . $file))
 		{
-			find_global_problems($real_globals, $ignored_folders, $dir . '/' . $file, '', $basedir);
+			find_global_problems($real_globals, $ignored_folders, $dir . '/' . $file, '');
 			continue;
 		}
 		if (substr($file, -4) != '.php')
@@ -209,7 +206,7 @@ function find_global_problems($real_globals = array(), $ignored_folders = array(
 					$old_file = $file;
 					$func_line = substr_count(substr($php, 0, $match['pos']), "\n");
 					$glob_line = substr_count(substr($match['pristine'], 0, strpos($match['pristine'], $test_me)), "\n");
-					echo '<li class="duplicates', $is_new ? ' new' : '', '">Duplicate globals in <span>', str_replace($basedir, '', $dir), '<span class="file">', $file, ':', $func_line + $glob_line, '</span></span> (', $match[1] ?: 'anonymous function', ') -- ', $find_dupes, '</li>';
+					echo '<li class="duplicates', $is_new ? ' new' : '', '">Duplicate globals in <span>', $curdir, '<span class="file">', $file, ':', $func_line + $glob_line, '</span></span> (', $match[1] ?: 'anonymous function', ') -- ', $find_dupes, '</li>';
 
 					if (isset($_GET['fixme']) && strpos($match['clean'], 'global') !== false)
 					{
@@ -230,7 +227,7 @@ function find_global_problems($real_globals = array(), $ignored_folders = array(
 			preg_match_all('~\$[a-zA-Z_]+~', implode(', ', $globs[1]), $there_we_are);
 			$val = str_replace($globs[0], '', $match['clean']);
 			if (isset($there_we_are[0]))
-			{                
+			{
 				foreach ($there_we_are[0] as $test_me)
 				{
 					if (!preg_match('~\\' . $test_me . '[^a-zA-Z_]~', $val))
@@ -453,38 +450,54 @@ function find_javascript($php)
 	$script = array();
 	$pos = 0;
 
+	// find script start
 	$scriptstart = stripos($php, '<script', $pos);
-	if ($scriptstart !== false)
+
+	// used by PortaMx for compressed inline javascript
+	if($scriptstart === false)
+		$scriptstart = stripos($php, 'PortaMx_loadCompressed(', $pos);
+
+	// used by PortaMx for inline javascript
+	if($scriptstart === false)
+		$scriptstart = stripos($php, 'addInlineJavascript(', $pos);
+
+	while($scriptstart !== false)
 	{
-		$scriptend = stripos($php, '</script>', $scriptstart);
+		$scriptend= stripos($php, '</script>', $scriptstart);
+
+		// used by PortaMx for compressed inline javascript
+		if($scriptend === false)
+			$scriptend = stripos($php, 'array(), true)', $scriptstart);
+
+		// used by PortaMx for inline javascript
+		if($scriptend === false)
+			$scriptend = stripos($php, ';\');', $scriptstart);
+
+		if($scriptend === false)
+			break;
+
 		$pos = $scriptstart;
-		while ($pos < $scriptend)
+		while ($pos !== false && $pos < $scriptend)
 		{
 			$pos = stripos($php, 'function', $pos);
 			if ($pos !== false && $pos < $scriptend)
 			{
 				$func = $pos;
 				$pos = stripos($php, '{', $func) +1;
-				$open = 1;
-				$close = 0;
-				while ($open != $close)
-				{
-					$pos = stripos($php, '}', $pos);
-					if ($pos !== false && $pos < $scriptend)
-						$close++;
-
-					if ($open != $close)
-					{
-						$pos = stripos($php, '{', $pos);
-						if ($pos !== false && $pos < $scriptend)
-							$open++;
-					}
-				}
 				$script[] = array('start' => $func, 'end' => $pos);
 			}
-			else
-				break;
 		}
+
+		// find next start
+		$scriptstart = stripos($php, '<script', $scriptend);
+
+		// used by PortaMx for compressed inline javascript
+		if($scriptstart === false)
+			$scriptstart = stripos($php, 'PortaMx_loadCompressed(', $scriptend);
+
+		// used by PortaMx for inline javascript
+		if($scriptstart === false)
+			$scriptstart = stripos($php, 'addInlineJavascript(', $scriptend);
 	}
 	return $script;
 }
